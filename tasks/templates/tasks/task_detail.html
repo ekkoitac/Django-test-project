@@ -1,0 +1,24 @@
+{% extends "tasks/base.html" %}
+
+{% block content %}
+<h1>📝 Task Detail</h1>
+
+<div style="max-width: 500px; margin: 40px auto; background: white; border-radius: 8px; padding: 24px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+    <p style="font-size: 1.1em; margin-bottom: 8px;">
+        <strong>Title:</strong> {{ task.title }}
+    </p>
+    <p style="margin-bottom: 8px;">
+        <strong>Status:</strong>
+        {% if task.completed %}
+            <span style="color: #48bb78;">✅ Completed</span>
+        {% else %}
+            <span style="color: #f6ad55;">⏳ Pending</span>
+        {% endif %}
+    </p>
+    <p style="margin-bottom: 20px; color: #777; font-size: 0.9em;">
+        <strong>Created:</strong> {{ task.created_at|date:"N j, Y, g:i a" }}
+    </p>
+
+    <a href="{% url 'index' %}" style="padding: 8px 16px; background: #667eea; color: white; border-radius: 4px; text-decoration: none;">← Back to list</a>
+</div>
+{% endblock %}

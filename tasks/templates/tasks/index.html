@@ -38,7 +38,9 @@
 <ul class="task-list">
     {% for task in tasks %}
     <li class="task-item {% if task.completed %}completed{% endif %}">
-        <span class="task-title">{{ task.title }}</span>
+        <span class="task-title">
+                <a href="{% url 'task_detail' task.id %}" style="color: inherit; text-decoration: none;">{{ task.title }}</a>
+            </span>
         <div class="task-actions">
             <form method="post" action="{% url 'toggle_task' task.id %}" style="display: inline;">
                 {% csrf_token %}

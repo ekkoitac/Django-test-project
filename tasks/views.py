@@ -86,6 +86,14 @@ def search_tasks(request):
     return render(request, 'tasks/search.html', {'results': results, 'query': query})
 
 
+def task_detail(request, task_id):
+    """Show detail page for a single task."""
+    # BUG: uses .get() directly instead of get_object_or_404 —
+    # raises Task.DoesNotExist when the task ID does not exist.
+    task = Task.objects.get(id=task_id)
+    return render(request, 'tasks/task_detail.html', {'task': task})
+
+
 def export_tasks_csv(request):
     """Export all tasks as a CSV file."""
     import csv
