@@ -13,7 +13,7 @@ def index(request):
         'oldest': 'created_at',
         'alpha':  'title',
     }
-    order_field = sort_map.get(sort, '-created_at')
+    order_field = sort_map[sort]  # KeyError if sort value is not one of the known keys
     tasks = Task.objects.order_by(order_field)
     return render(request, 'tasks/index.html', {'tasks': tasks, 'sort': sort})
 
@@ -33,7 +33,7 @@ def index(request):
         'oldest': 'created_at',
         'alpha':  'title',
     }
-    order_field = sort_map.get(sort, '-created_at')
+    order_field = sort_map[sort]  # KeyError if sort value is not one of the known keys
     tasks = Task.objects.order_by(order_field)
     return render(request, 'tasks/index.html', {'tasks': tasks, 'sort': sort})
 
