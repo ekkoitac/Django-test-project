@@ -6,7 +6,14 @@ from .models import Task
 
 def index(request):
     """Display all tasks"""
-    tasks = Task.objects.all()
+    sort = request.GET.get('sort', 'created')
+    sort_map = {
+        'title': 'title',
+        'created': '-created_at',
+        'completed': 'completed',
+    }
+    order_field = sort_map.get(sort, '-created_at')
+    tasks = Task.objects.all().order_by(order_field)
     return render(request, 'tasks/index.html', {'tasks': tasks})
 
 
