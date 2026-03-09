@@ -10,9 +10,26 @@
     </form>
 </div>
 
+<div style="text-align: center; margin-bottom: 16px;">
+    <form method="get" action="{% url 'index' %}" style="display: inline;">
+        <label for="sort" style="font-size: 0.9em; color: #555;">Sort by:</label>
+        <select name="sort" id="sort" onchange="this.form.submit()" style="padding: 4px 8px; border: 1px solid #ccc; border-radius: 4px; margin-left: 4px;">
+            <option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest first</option>
+            <option value="oldest" {% if sort == 'oldest' %}selected{% endif %}>Oldest first</option>
+            <option value="alpha"  {% if sort == 'alpha'  %}selected{% endif %}>A → Z</option>
+        </select>
+    </form>
+</div>
+
 <form method="post" action="{% url 'add_task' %}" class="add-task-form">
     {% csrf_token %}
     <input type="text" name="title" placeholder="Add a new task..." required>
+    <select name="category" style="padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px; margin-left: 6px;">
+        <option value="">-- Select category --</option>
+        <option value="work">💼 Work</option>
+        <option value="personal">🏠 Personal</option>
+        <option value="shopping">🛒 Shopping</option>
+    </select>
     <button type="submit">Add Task</button>
 </form>
 

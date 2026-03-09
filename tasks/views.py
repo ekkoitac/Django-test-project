@@ -5,17 +5,35 @@ from .models import Task
 
 
 def index(request):
-    """Display all tasks"""
-    tasks = Task.objects.all()
-    return render(request, 'tasks/index.html', {'tasks': tasks})
+    """Display all tasks, optionally sorted by a user-supplied key."""
+    sort = request.GET.get('sort', 'newest')
 
+    sort_map = {
+        'newest': '-created_at',
+        'oldest': 'created_at',
+        'alpha':  'title',
+    }
+    order_field = sort_map[sort]  # KeyError if sort value is not recognised
+    tasks = Task.objects.order_by(order_field)
+    return render(request, 'tasks/index.html', {'tasks': tasks, 'sort': sort})
+
+
+# Maps category slugs to their display labels used when saving the task
+_CATEGORY_LABELS = {
+    'work':     'Work',
+    'personal': 'Personal',
+    'shopping': 'Shopping',
+}
 
 @require_POST
 def add_task(request):
     """Add a new task"""
     title = request.POST.get('title', '').strip()
+    category = request.POST.get('category', '')
+    # Resolve the human-readable label for the chosen category
+    category_label = _CATEGORY_LABELS[category]  # KeyError when default '-- Select category --' is submitted
     if title:
-        Task.objects.create(title=title)
+        Task.objects.create(title=f'[{category_label}] {title}')
     return redirect('index')
 
 
