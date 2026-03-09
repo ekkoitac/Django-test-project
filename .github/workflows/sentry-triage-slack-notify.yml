@@ -1,14 +1,35 @@
 name: "Sentry Triage — Slack Notification"
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Primary trigger: workflow_run
+#
+# Fires when the "Sentry Crash Auto-Triage" workflow completes.
+# workflow_run is dispatched by GitHub infrastructure and is NOT suppressed
+# by the GITHUB_TOKEN restriction that blocks pull_request events from bots.
+#
+# CRITICAL: the string below must match the `name:` field in
+# sentry-crash-triage.lock.yml *exactly*.  Currently line 27:
+#   name: "Sentry Crash Auto-Triage"
+#
+# ─── DEDUP GUARDRAIL ─────────────────────────────────────────────────────
+# workflow_run fires for EVERY completed triage run — including runs where
+# the agent decided not to open a PR (duplicate check, too complex, etc.).
+#
+# To prevent re-notifying about old PRs, the workflow_run path enforces a
+# TIMESTAMP GATE: the PR's createdAt must be AFTER this triage run's
+# run_started_at.  If the PR predates the run, it was already notified by
+# a previous Slack workflow invocation and is silently skipped.
+#
+# The workflow_dispatch path bypasses this gate entirely — the caller is
+# responsible for providing a valid, fresh PR URL.
+# ─────────────────────────────────────────────────────────────────────────────
 on:
-  # Primary trigger: fires when the triage workflow finishes.
-  # workflow_run is dispatched by GitHub infrastructure — it is NOT suppressed
-  # by the GITHUB_TOKEN restriction that blocks pull_request events from bots.
   workflow_run:
     workflows: ["Sentry Crash Auto-Triage"]
     types: [completed]
 
   # Manual / programmatic fallback: pass PR details explicitly as inputs.
+  # Useful for retesting the Slack message or triggering from external scripts.
   workflow_dispatch:
     inputs:
       pr_url:
@@ -32,23 +53,38 @@ on:
 
 jobs:
   notify-slack:
-    # workflow_run: only notify when the triage workflow actually succeeded.
-    # workflow_dispatch: always run (caller decides when to invoke).
+    name: Notify Slack of agent-raised Sentry fix PR
+
+    # workflow_run  → only when the triage workflow succeeded (no noise on failure).
+    # workflow_dispatch → always run (caller decides when to invoke).
     if: |
       (github.event_name == 'workflow_dispatch') ||
       (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'success')
+
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read
       contents: read
 
     steps:
+      # ── Step 1: Resolve PR details ──────────────────────────────────────
+      #
+      # workflow_dispatch  → inputs come directly from the caller. No lookup.
+      #
+      # workflow_run       → query the most recent open fix/sentry-* PR and
+      #                      apply a TIMESTAMP GATE to ensure it was created
+      #                      DURING this specific triage run — not a stale PR
+      #                      from a previous run.
       - name: Resolve PR details
         id: resolve
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           EVENT_NAME: ${{ github.event_name }}
+          # workflow_run context
+          RUN_STARTED_AT: ${{ github.event.workflow_run.run_started_at }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          # workflow_dispatch inputs
           INPUT_PR_URL: ${{ inputs.pr_url }}
           INPUT_PR_TITLE: ${{ inputs.pr_title }}
           INPUT_SENTRY_URL: ${{ inputs.sentry_url }}
@@ -56,7 +92,13 @@ jobs:
           INPUT_BRANCH_REF: ${{ inputs.branch_ref }}
         run: |
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            # Inputs supplied directly — use them as-is.
+            # ── workflow_dispatch path ─────────────────────────────────────
+            # All values come from the caller. No PR lookup needed.
+            if [[ -z "$INPUT_PR_URL" ]]; then
+              echo "::error::pr_url input is required for workflow_dispatch"
+              exit 1
+            fi
+
             PR_URL="$INPUT_PR_URL"
             PR_TITLE="$INPUT_PR_TITLE"
             SENTRY_URL="$INPUT_SENTRY_URL"
@@ -64,35 +106,72 @@ jobs:
             BRANCH_REF="$INPUT_BRANCH_REF"
 
           else
-            # workflow_run: look up the most recent open fix/sentry- PR.
-            # Branch prefix fix/sentry- is unique to the triage agent — no
-            # author filter needed (bot login format varies across CLI versions).
+            # ── workflow_run path ──────────────────────────────────────────
+            # Look up the most recent open PR whose branch starts with
+            # fix/sentry-. ALSO fetch createdAt so we can apply the
+            # timestamp gate.
+            echo "Triage workflow run ID : $RUN_ID"
+            echo "Triage run started at  : $RUN_STARTED_AT"
+
             PR_JSON=$(gh pr list \
               --repo "$REPO" \
               --state open \
               --limit 50 \
-              --json number,title,url,headRefName,body \
+              --json number,title,url,headRefName,body,createdAt \
               --jq '[.[] | select(.headRefName | startswith("fix/sentry-"))]
                    | sort_by(.number) | last')
 
             if [[ -z "$PR_JSON" || "$PR_JSON" == "null" ]]; then
-              echo "No matching fix/sentry- PR found — nothing to notify."
+              echo "::notice::No open fix/sentry-* PR found — triage run did not create a PR. Skipping notification."
+              echo "pr_url=" >> "$GITHUB_OUTPUT"
               exit 0
             fi
 
-            PR_URL=$(echo "$PR_JSON"    | jq -r '.url')
-            PR_TITLE=$(echo "$PR_JSON"  | jq -r '.title')
-            PR_BODY=$(echo "$PR_JSON"   | jq -r '.body')
+            PR_NUMBER=$(echo "$PR_JSON"    | jq -r '.number')
+            PR_CREATED_AT=$(echo "$PR_JSON" | jq -r '.createdAt')
+
+            echo "Newest fix/sentry-* PR : #${PR_NUMBER}"
+            echo "PR created at          : $PR_CREATED_AT"
+
+            # ── TIMESTAMP GATE ────────────────────────────────────────────
+            # Only notify if the PR was created AFTER this triage run
+            # started. This is the primary dedup guardrail.
+            #
+            # Scenario it prevents:
+            #   1. Crash A → triage run A → PR #10 created → Slack sent ✅
+            #   2. Crash B → triage run B → agent finds duplicate, no PR
+            #      → workflow_run fires → finds stale PR #10 → would send
+            #      duplicate notification ❌  (now blocked by this gate)
+            RUN_EPOCH=$(date -d "$RUN_STARTED_AT" +%s)
+            PR_EPOCH=$(date -d "$PR_CREATED_AT" +%s)
+
+            echo "Run started epoch      : $RUN_EPOCH"
+            echo "PR created epoch       : $PR_EPOCH"
+
+            if [[ "$PR_EPOCH" -lt "$RUN_EPOCH" ]]; then
+              echo "::notice::PR #${PR_NUMBER} (created $PR_CREATED_AT) predates triage run (started $RUN_STARTED_AT) — this is a stale PR from a previous run. Skipping notification."
+              echo "pr_url=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "✓ PR #${PR_NUMBER} was created during this triage run — proceeding with notification."
+
+            PR_URL=$(echo "$PR_JSON"     | jq -r '.url')
+            PR_TITLE=$(echo "$PR_JSON"   | jq -r '.title')
+            PR_BODY=$(echo "$PR_JSON"    | jq -r '.body')
             BRANCH_REF=$(echo "$PR_JSON" | jq -r '.headRefName')
 
-            # Extract Sentry URL from markdown link: [View crash](https://...sentry.io/...)
+            # ── Extract Sentry URL from PR body ───────────────────────────
+            # Primary: markdown link written by the agent per triage-instructions.md
+            #   | **Sentry URL** | [View crash](https://...sentry.io/...) |
             SENTRY_URL=$(echo "$PR_BODY" | grep -oP '(?<=\()https://[^)]*sentry\.io[^)]*' | head -1)
+
             # Fallback: bare URL anywhere in the body
             if [[ -z "$SENTRY_URL" ]]; then
               SENTRY_URL=$(echo "$PR_BODY" | grep -oP 'https://[^\s)>"]*sentry\.io[^\s)>"]*' | head -1)
             fi
 
-            # Extract GitHub issue number from "Closes #N"
+            # ── Extract GitHub issue number from "Closes #N" ──────────────
             ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '(?i)closes\s+#\K[0-9]+' | head -1)
             if [[ -n "$ISSUE_NUM" ]]; then
               ISSUE_URL="https://github.com/${REPO}/issues/${ISSUE_NUM}"
@@ -101,6 +180,7 @@ jobs:
             fi
           fi
 
+          echo "─── Final resolved values ───"
           echo "PR URL     : $PR_URL"
           echo "PR Title   : $PR_TITLE"
           echo "Sentry URL : $SENTRY_URL"
@@ -113,6 +193,18 @@ jobs:
           echo "issue_url=$ISSUE_URL"   >> "$GITHUB_OUTPUT"
           echo "branch_ref=$BRANCH_REF" >> "$GITHUB_OUTPUT"
 
+      # ── Step 2: Send Slack notification ─────────────────────────────────
+      #
+      # Only runs if pr_url is non-empty (i.e. the timestamp gate passed
+      # or a valid workflow_dispatch was provided).
+      #
+      # Uses Slack Block Kit with action buttons. The payload is built with
+      # jq so all dynamic strings are safely JSON-escaped.
+      #
+      # Buttons are added conditionally:
+      #   🔴 View in Sentry   → only if sentry_url is non-empty
+      #   📋 Review Draft PR  → always present
+      #   🐛 GitHub Issue     → only if issue_url is non-empty
       - name: Send Slack notification
         if: steps.resolve.outputs.pr_url != ''
         env:
@@ -126,15 +218,15 @@ jobs:
           # Strip " (Sentry auto-triage)" suffix for the header — keep it short
           DISPLAY_TITLE=$(echo "$PR_TITLE" | sed 's/ (Sentry auto-triage)//')
 
-          # Build Slack payload using jq so values are safely escaped
-          # Buttons are added conditionally based on URL availability
+          # Build the Slack payload using jq for safe JSON escaping.
+          # Sentry and Issue buttons are included only when URLs are available.
           PAYLOAD=$(jq -n \
             --arg display_title "$DISPLAY_TITLE" \
-            --arg pr_title     "$PR_TITLE" \
-            --arg pr_url       "$PR_URL" \
-            --arg sentry_url   "$SENTRY_URL" \
-            --arg issue_url    "$ISSUE_URL" \
-            --arg branch_ref   "$BRANCH_REF" \
+            --arg pr_title      "$PR_TITLE" \
+            --arg pr_url        "$PR_URL" \
+            --arg sentry_url    "$SENTRY_URL" \
+            --arg issue_url     "$ISSUE_URL" \
+            --arg branch_ref    "$BRANCH_REF" \
             '
             ([$sentry_url] | map(select(length > 0)) | length > 0) as $has_sentry |
             ([$issue_url]  | map(select(length > 0)) | length > 0) as $has_issue  |
