@@ -183,8 +183,10 @@ fix: <crash title> (Sentry auto-triage)
 | **Crash title** | <title from GitHub issue> |
 | **Culprit** | `<culprit extracted from issue body>` |
 | **Severity** | <level extracted from issue body> |
-| **Sentry URL** | [View crash](<sentry url from issue body>) |
+| **Sentry URL** | [View crash](PASTE_FULL_SENTRY_HTTPS_URL_HERE_NO_ANGLE_BRACKETS) |
 | **Triage issue** | Closes #<GitHub issue number that triggered this workflow> |
+
+> **IMPORTANT for Sentry URL**: Replace `PASTE_FULL_SENTRY_HTTPS_URL_HERE_NO_ANGLE_BRACKETS` with the raw full URL exactly as extracted, e.g. `https://demo3n.sentry.io/organizations/...`. Do NOT wrap it in angle brackets `<>`. The format must be exactly `[View crash](https://...)` with no extra parentheses or brackets.
 
 ---
 

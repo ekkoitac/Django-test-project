@@ -61,7 +61,7 @@ Parse the following fields from the issue:
 |-------|-----------------|
 | **Crash title** | The GitHub issue title: `${{ github.event.issue.title }}` |
 | **Severity level** | Look for a word such as `fatal`, `error`, or `warning` in the issue body; default to `error` if absent |
-| **Sentry URL** | The first `https://sentry.io/...` URL that appears in the issue body |
+| **Sentry URL** | The first `https://` URL containing `sentry.io` that appears in the issue body (may be a subdomain like `https://demo3n.sentry.io/...`) |
 | **Culprit** | A line in the body that identifies the file and function — look for patterns like `tasks/views.py in delete_task` or `tasks.views in delete_task` |
 
 Detailed parsing guidance is in `.github/triage-instructions.md §2a`.
@@ -120,8 +120,10 @@ The PR **must** be a **draft**. Use this description format exactly:
 | **Crash title** | <title from issue> |
 | **Culprit** | `<culprit>` |
 | **Severity** | <level> |
-| **Sentry URL** | [View crash](<sentry url from issue body>) |
+| **Sentry URL** | [View crash](PASTE_FULL_SENTRY_HTTPS_URL_HERE_NO_ANGLE_BRACKETS) |
 | **Triage issue** | Closes #${{ github.event.issue.number }} |
+
+> **IMPORTANT for Sentry URL**: Replace `PASTE_FULL_SENTRY_HTTPS_URL_HERE_NO_ANGLE_BRACKETS` with the raw full URL exactly as extracted, e.g. `https://demo3n.sentry.io/organizations/...`. Do NOT wrap it in angle brackets `<>`. The format must be exactly `[View crash](https://...)` with no extra parentheses or brackets.
 
 ## Root Cause
 

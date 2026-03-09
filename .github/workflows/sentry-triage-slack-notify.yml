@@ -85,11 +85,11 @@ jobs:
             PR_BODY=$(echo "$PR_JSON"   | jq -r '.body')
             BRANCH_REF=$(echo "$PR_JSON" | jq -r '.headRefName')
 
-            # Extract Sentry URL from markdown link: [View crash](https://sentry.io/...)
-            SENTRY_URL=$(echo "$PR_BODY" | grep -oP '(?<=\()https://[^)]*sentry[^)]*' | head -1)
+            # Extract Sentry URL from markdown link: [View crash](https://...sentry.io/...)
+            SENTRY_URL=$(echo "$PR_BODY" | grep -oP '(?<=\()https://[^)]*sentry\.io[^)]*' | head -1)
             # Fallback: bare URL anywhere in the body
             if [[ -z "$SENTRY_URL" ]]; then
-              SENTRY_URL=$(echo "$PR_BODY" | grep -oP 'https://[^\s)>"]+sentry\.io[^\s)>"]+' | head -1)
+              SENTRY_URL=$(echo "$PR_BODY" | grep -oP 'https://[^\s)>"]*sentry\.io[^\s)>"]*' | head -1)
             fi
 
             # Extract GitHub issue number from "Closes #N"
@@ -123,74 +123,76 @@ jobs:
           PR_TITLE: ${{ steps.resolve.outputs.pr_title }}
           BRANCH_REF: ${{ steps.resolve.outputs.branch_ref }}
         run: |
-          if [[ -n "$SENTRY_URL" ]]; then
-            SENTRY_FIELD="*Sentry Issue:*\n<${SENTRY_URL}|View in Sentry>"
-          else
-            SENTRY_FIELD="*Sentry Issue:*\nURL not found in PR body"
-          fi
+          # Strip " (Sentry auto-triage)" suffix for the header — keep it short
+          DISPLAY_TITLE=$(echo "$PR_TITLE" | sed 's/ (Sentry auto-triage)//')
 
-          if [[ -n "$ISSUE_URL" ]]; then
-            ISSUE_FIELD="*GitHub Issue:*\n<${ISSUE_URL}|View Issue>"
-          else
-            ISSUE_FIELD="*GitHub Issue:*\nReference not found in PR body"
-          fi
+          # Build Slack payload using jq so values are safely escaped
+          # Buttons are added conditionally based on URL availability
+          PAYLOAD=$(jq -n \
+            --arg display_title "$DISPLAY_TITLE" \
+            --arg pr_title     "$PR_TITLE" \
+            --arg pr_url       "$PR_URL" \
+            --arg sentry_url   "$SENTRY_URL" \
+            --arg issue_url    "$ISSUE_URL" \
+            --arg branch_ref   "$BRANCH_REF" \
+            '
+            ([$sentry_url] | map(select(length > 0)) | length > 0) as $has_sentry |
+            ([$issue_url]  | map(select(length > 0)) | length > 0) as $has_issue  |
 
-          PAYLOAD=$(cat <<EOF
-          {
-            "text": "🤖 Sentry Auto-Triage: Draft PR raised — ${PR_TITLE}",
-            "blocks": [
-              {
-                "type": "header",
-                "text": {
-                  "type": "plain_text",
-                  "text": "🤖 Sentry Auto-Triage: Fix PR Raised",
-                  "emoji": true
-                }
-              },
-              {
-                "type": "section",
-                "text": {
-                  "type": "mrkdwn",
-                  "text": "A production crash was automatically triaged by GitHub Copilot. A draft fix PR has been opened and is awaiting human review."
-                }
-              },
-              {
-                "type": "section",
-                "fields": [
-                  {
-                    "type": "mrkdwn",
-                    "text": "${SENTRY_FIELD}"
-                  },
-                  {
-                    "type": "mrkdwn",
-                    "text": "*Draft Fix PR:*\n<${PR_URL}|${PR_TITLE}>"
-                  },
-                  {
-                    "type": "mrkdwn",
-                    "text": "${ISSUE_FIELD}"
-                  },
-                  {
-                    "type": "mrkdwn",
-                    "text": "*Branch:*\n\`${BRANCH_REF}\`"
+            (if $has_sentry then [{
+              "type": "button",
+              "text": {"type": "plain_text", "text": "🔴 View in Sentry", "emoji": true},
+              "url": $sentry_url,
+              "style": "danger"
+            }] else [] end) as $sentry_btn |
+
+            [{
+              "type": "button",
+              "text": {"type": "plain_text", "text": "📋 Review Draft PR", "emoji": true},
+              "url": $pr_url,
+              "style": "primary"
+            }] as $pr_btn |
+
+            (if $has_issue then [{
+              "type": "button",
+              "text": {"type": "plain_text", "text": "🐛 GitHub Issue", "emoji": true},
+              "url": $issue_url
+            }] else [] end) as $issue_btn |
+
+            {
+              "text": ("🔴 " + $display_title),
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": ("🔴 " + $display_title),
+                    "emoji": true
                   }
-                ]
-              },
-              {
-                "type": "divider"
-              },
-              {
-                "type": "context",
-                "elements": [
-                  {
+                },
+                {
+                  "type": "context",
+                  "elements": [{
                     "type": "mrkdwn",
-                    "text": "⚠️ This is a *draft PR* — review and approve before merging. Do not merge directly."
-                  }
-                ]
-              }
-            ]
-          }
-          EOF
-          )
+                    "text": "A production crash was automatically triaged by GitHub Copilot. A draft fix PR has been opened and is awaiting human review."
+                  }]
+                },
+                {"type": "divider"},
+                {
+                  "type": "actions",
+                  "elements": ($sentry_btn + $pr_btn + $issue_btn)
+                },
+                {"type": "divider"},
+                {
+                  "type": "context",
+                  "elements": [{
+                    "type": "mrkdwn",
+                    "text": ("⚠️ *Draft PR* — review and approve before merging. Do not merge directly.   Branch: `" + $branch_ref + "`")
+                  }]
+                }
+              ]
+            }
+            ')
 
           HTTP_STATUS=$(curl -s -o /tmp/slack_response.txt -w "%{http_code}" \
             -X POST \
