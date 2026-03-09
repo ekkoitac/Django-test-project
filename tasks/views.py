@@ -28,7 +28,11 @@ def add_task(request):
     due_date = None
     if due_date_str:
         # Parse the due date — expects YYYY-MM-DD format
-        due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()  # ValueError if user types e.g. 09/03/2026
+        try:
+            due_date = datetime.strptime(due_date_str, '%Y-%m-%d').date()
+        except ValueError:
+            # Ignore invalid date formats, proceed without due date
+            pass
 
     if title:
         label = f'{title} (due {due_date})' if due_date else title
