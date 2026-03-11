@@ -96,12 +96,17 @@ def task_detail(request, task_id):
 
 
 def export_tasks_csv(request):
-    """Export all tasks as a CSV file."""
+    """Export all tasks as a CSV file with completion rate summary."""
     import csv
     response = HttpResponse(content_type='text/csv')
     response['Content-Disposition'] = 'attachment; filename="tasks.csv"'
     writer = csv.writer(response)
     writer.writerow(['ID', 'Title', 'Completed', 'Created At'])
+    # REGRESSION: ZeroDivisionError when task list is empty (total == 0)
+    total = Task.objects.count()
+    completed_count = Task.objects.filter(completed=True).count()
+    completion_rate = round(completed_count / total * 100, 1)
+    writer.writerow(['', f'Completion rate: {completion_rate}%', '', ''])
     for task in Task.objects.all().order_by('id'):
         writer.writerow([task.id, task.title, task.completed, task.created_at])
     return response
