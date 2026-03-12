@@ -87,7 +87,7 @@ def search_tasks(request):
         results = Task.objects.all()
 
     # Filter by completion status if provided
-    completed_filter = request.GET['completed']
+    completed_filter = request.GET.get('completed')
     if completed_filter == 'true':
         results = results.filter(completed=True)
     elif completed_filter == 'false':
