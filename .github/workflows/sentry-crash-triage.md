@@ -140,17 +140,28 @@ or create a new issue with differentiated context.
 
 Then **stop immediately**. Do not open a PR.
 
-### 3b — Open PR check
-Search open pull requests for the same exception class or culprit function name
-in the title or branch name (branch prefix `fix/sentry-`).
-If an open PR already exists, post a comment on the issue linking to it and
-**stop**. Do not open a second PR.
+### 3b — Open PR check (search by culprit, not exception class)
+Search open pull requests for any PR whose branch name or title references
+the **culprit file** or **culprit function name** extracted in Step 2.
+Also search open `fix/sentry-` branches for the function name.
 
-### 3c — Recently merged PR check
-Search merged pull requests (last 30 days) for the same exception class.
-If a recently merged PR appears to address the same crash, note this in the
-impact analysis comment (Step 7) and reduce confidence to Medium.
-Do NOT stop — the merge may not have been deployed yet.
+If an open PR already exists that touches the crashing function:
+- Post a comment on the new issue:
+  ```
+  ## Fix Already In Progress
+  An open pull request already addresses this crash: #<pr_number>
+  PR: #<pr_number> — <pr_title>
+  Please review and merge that PR rather than triaging again.
+  ```
+- **Stop immediately.** Do not open a PR.
+
+### 3c — Recently merged PR → regression trigger
+Search merged pull requests (last 30 days) for PRs whose changed files include
+the culprit file. For each match, check whether the merge **introduced the
+crashing line** (see `.github/triage-instructions.md §10 Check 3` and `§11`).
+
+- If the crashing line was **introduced by the merged PR** → `REGRESSION_DETECTED=true`. Continue triage.
+- If the merged PR **fixed** the crashing line and the crash is recurring → note in the impact analysis comment, reduce confidence by one level, continue triage.
 
 ---
 
@@ -176,22 +187,27 @@ Before writing any code, answer these three questions:
 
 ## Step 6 — Check git history and detect regressions
 
-Run:
-```bash
-git log --oneline -15 -- <culprit_file>
-```
+Follow the full procedure in `.github/triage-instructions.md §11`.
 
-Identify any recent commit that removed a guard or changed the logic.
+Summary:
+1. `git log --oneline -15 -- <culprit_file>` — list recent commits.
+2. `git show <hash> -- <culprit_file>` for each commit touching the crashing
+   function — find the commit that **introduced or last modified the crashing line**.
+3. Once identified, run:
+   ```bash
+   gh pr list --state merged --search "<commit_hash>" --json number,title,mergedAt,author
+   ```
+   to find the merged PR that contains that commit.
+4. If the PR was merged within the last 30 days and its diff introduced the
+   crashing line → `REGRESSION_DETECTED=true`. Record PR number, commit hash,
+   merge date, and PR author.
+5. If no recent merged PR introduced the crashing line → `REGRESSION_DETECTED=false`
+   (original bug, not a regression).
 
-### Regression detection
-If a recent commit (within the last 30 commits) touched the crashing function
-**and** the crash appears to have been introduced by that specific commit:
-
-1. Record the commit hash, date, and commit message.
-2. Determine the author's GitHub username from `git log --format="%ae %an" -1 <hash>`.
-3. Search merged pull requests for that commit hash to find an associated PR number.
-4. Set a flag `REGRESSION_DETECTED=true` — this affects the PR description
-   (Step 11) and the reviewer assignment (Step 11).
+**Note:** A *feature* commit that adds a new unguarded `request.GET['key']`
+access where that key is not always present is a regression just as much as a
+commit that removes a guard — because requests that previously succeeded now
+crash. Evaluate the *effect on callers*, not the *intent of the commit*.
 
 ---
 
@@ -235,8 +251,8 @@ Post the comment using this exact structure:
 **QA Verification Notes:**
 {Specific instructions for QA: which endpoint or flow to exercise, which instance to use, what input triggers the crash}
 
-{If a recently merged PR was found in Step 3c, add:}
-> ⚠️ A recently merged PR may already address this crash but may not be deployed yet: #{pr_number}
+{If Step 3c found a merged PR that fixed (not introduced) the crashing line, add:}
+> ⚠️ A merged PR (#<pr_number>) previously addressed this crash but may not be deployed yet or may have been reverted.
 ```
 
 ---
@@ -285,8 +301,9 @@ Applies when Axis 1 is **Data/state issue** (any Axis 2 cause),
 ### Category B — Code PR needed
 Applies when Axis 1 is **Code defect**.
 
-1. Apply GitHub label `sentry-triage-code-fix` to the issue.
-2. Continue to Steps 9–11.
+1. Apply GitHub label `sentry-triage-code-fix` to the **issue**.
+2. Apply GitHub label `sentry-triage-code-fix` to the **PR** created in Step 11.
+3. Continue to Steps 9–11.
 
 ---
 

@@ -388,36 +388,81 @@ query string. Compare title and culprit module:
   but note the related issue in the impact analysis comment.
 
 ### Check 2 — Open PR deduplication
-Search `fix/sentry-` branches and open PR titles for the exception class or
-culprit function name. If an open PR exists:
-- Post a comment on the new issue: `"An open PR already addresses this crash: #<pr_number>."`
-- Stop. Do not open a second PR.
+Search open pull requests for any PR whose branch or title references the
+**culprit file** (`<file_path>`) or the **culprit function** (`<function_name>`).
+Also search for open `fix/sentry-` branches.
 
-### Check 3 — Recently merged PR check
-Search merged PRs from the last 30 days for the exception class. If found:
-- Do NOT stop — the fix may not be deployed.
-- Add a warning note to the impact analysis comment.
-- Reduce triage confidence by one level (High → Medium, Medium → Low).
+If an open PR already exists that touches the crashing function:
+- Post a comment on the new issue:
+  ```
+  ## Fix Already In Progress
+
+  An open pull request already addresses this crash: #<pr_number>
+  **PR:** #<pr_number> — <pr_title>
+
+  Please review and merge that PR rather than opening a duplicate fix.
+  If this crash has a different root cause, reopen with additional context.
+  ```
+- **Stop immediately.** Do not open a second PR.
+
+### Check 3 — Recently merged PR → regression trigger
+Search merged pull requests (last 30 days) whose **changed files** include the
+culprit file (`<file_path>`) or whose title/branch references the culprit
+function name.
+
+For each matching merged PR:
+1. Check whether that PR **introduced the crashing line** by running
+   `git show <merge_commit_hash> -- <culprit_file>` and looking for the
+   exact code that is now crashing (e.g. the direct `request.GET['key']`
+   access, the unguarded lookup, the removed `.get()` call).
+2. If the crashing line **was added or modified** by that merge:
+   - This is a **regression** — set `REGRESSION_DETECTED=true`.
+   - Record the PR number, commit hash, author, and date.
+   - Continue to full triage (do NOT stop here).
+3. If the merged PR **fixed** the crashing code (i.e. it removed or guarded
+   the problematic line) but the crash is happening again:
+   - Note in the impact analysis comment that a prior fix may not be
+     deployed or may have been reverted.
+   - Reduce triage confidence by one level (High → Medium, Medium → Low).
+   - Continue to full triage.
 
 ---
 
 ## 11 · Regression Detection Instructions
 
-A regression is defined as: a crash that is directly traceable to a specific
-code change in the last 30 commits that removed a guard, changed a default, or
-altered function behaviour.
+A regression is defined as: a crash whose crashing line was **introduced or
+modified by a recently merged Pull Request**. The introducing PR is the source
+of truth — not just the raw git commit.
 
 ### Detection procedure
 
-1. After running `git log --oneline -15 -- <culprit_file>`, examine each commit
-   that touched the crashing function.
-2. For each candidate commit, run:
+1. Run `git log --oneline -15 -- <culprit_file>` to get recent commits that
+   touched the culprit file.
+2. For each commit that touched the crashing function, run:
    ```bash
    git show <hash> -- <culprit_file>
    ```
-   Look for: removal of a `try/except`, removal of an `if` guard, a changed
-   default value, a changed method signature, or a removed `.get()` fallback.
-3. If such a commit is found, set `REGRESSION_DETECTED=true`.
+   Find the commit whose diff **introduced or last modified the crashing line**
+   (the line that raises the exception). "Introduced" includes:
+   - Adding a direct dictionary lookup (`dict['key']`, `request.GET['key']`,
+     `request.POST['key']`) with no `.get()` fallback
+   - Adding new code that assumes a parameter or attribute is always present
+   - Removing an existing `try/except`, `.get()` fallback, or `if` guard
+   - Changing a default value or method signature in a breaking way
+3. Once the introducing commit is identified, find the merged PR that contains
+   it:
+   ```bash
+   gh pr list --state merged --search "<commit_hash>" --json number,title,mergedAt,author
+   ```
+   If the PR is found and was merged within the last 30 days:
+   - Set `REGRESSION_DETECTED=true`.
+   - Record the PR number, commit hash, merge date, and PR author.
+4. If the introducing commit is **not** found in any merged PR (e.g. it was a
+   direct push), treat the commit itself as the regression source and set
+   `REGRESSION_DETECTED=true` using the commit author.
+5. If the crashing line has existed unchanged for more than 30 commits and no
+   recent PR introduced or modified it, `REGRESSION_DETECTED` remains `false` —
+   this is an original bug, not a regression.
 
 ### Metadata to collect
 
@@ -436,7 +481,8 @@ Extract:
 ### Effect on the PR
 
 When `REGRESSION_DETECTED=true`:
-1. Add label `potential-regression` to the issue.
-2. Include the `## Regression Detection` section in the PR description (see
+1. Add label `potential-regression` to the **issue**.
+2. Add label `potential-regression` to the **PR** as well.
+3. Include the `## Regression Detection` section in the PR description (see
    Step 11 of the workflow).
-3. Request review from `@{github_username}` in addition to `ramya-co/ops-team`.
+4. Request review from `@{github_username}` in addition to `ramya-co/ops-team`.
