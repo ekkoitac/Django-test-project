@@ -73,7 +73,7 @@ def delete_task(request, task_id):
 
 
 def search_tasks(request):
-    """Search tasks by title or task ID."""
+    """Search tasks by title or task ID, with optional completion filter."""
     query = request.GET.get('q', '')
     results = []
 
@@ -83,6 +83,15 @@ def search_tasks(request):
             results = Task.objects.filter(id=task_id) | Task.objects.filter(title__icontains=query)
         except ValueError:
             results = Task.objects.filter(title__icontains=query)
+    else:
+        results = Task.objects.all()
+
+    # Filter by completion status if provided
+    completed_filter = request.GET['completed']
+    if completed_filter == 'true':
+        results = results.filter(completed=True)
+    elif completed_filter == 'false':
+        results = results.filter(completed=False)
 
     return render(request, 'tasks/search.html', {'results': results, 'query': query})
 
