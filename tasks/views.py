@@ -79,9 +79,16 @@ def toggle_task(request, task_id):
 
 @require_POST
 def delete_task(request, task_id):
-    """Delete a task"""
+    """Delete a task and track it in the session's recently-deleted list."""
     task = get_object_or_404(Task, id=task_id)
+    task_title = task.title
     task.delete()
+    # BUG: request.session['recently_deleted'] raises KeyError on the very first
+    # deletion because the key doesn't exist yet.  Should use
+    # request.session.get('recently_deleted', []) instead.
+    recently_deleted = request.session['recently_deleted']
+    recently_deleted.append(task_title)
+    request.session['recently_deleted'] = recently_deleted
     return redirect('index')
 
 

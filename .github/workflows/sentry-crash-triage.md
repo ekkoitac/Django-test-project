@@ -1,7 +1,7 @@
 ---
 on:
   issues:
-    types: [assigned]
+    types: [opened]
 
 engine: copilot
 
@@ -29,18 +29,25 @@ Request** for human review.
 
 ## Step 0 — Detect and validate the issue source
 
-### Gate 1 — Assignee check (hard stop)
+### Gate 1 — Issue opener check (hard stop)
 
-Read `${{ github.event.assignee.login }}`.
+Read `${{ github.event.issue.user.login }}`.
 
-If the value is **not exactly** `sentry-triage-bot[bot]`, post **nothing**,
-make **no file changes**, and stop immediately.
-Output the message: `"Issue is not assigned to sentry-triage-bot — exiting gracefully."`
+The workflow is allowed to proceed for **two** opener types:
 
-This is the primary trigger gate. The workflow only runs when the designated
-GitHub App bot (`sentry-triage-bot[bot]`) is assigned to the issue — either
-automatically by Sentry's alert action or automatically by the Manual Triage
-Issue Form. Issues assigned to any other user are silently ignored.
+1. **Sentry bot:** the login is `sentry-io[bot]` **or** the login contains the
+   string `sentry` (case-insensitive).
+2. **Manual triage form:** the issue has the label `manual-triage` **or** the
+   body contains all three of the following `### ` headings (case-insensitive):
+   `### Exception / Error`, `### Issue Type`, `### Severity`.
+
+If **neither** condition is met, post **nothing**, make **no file changes**,
+and stop immediately.
+Output the message: `"Issue was not opened by a Sentry bot and does not match the manual triage form — exiting gracefully."`
+
+This is the primary trigger gate. The workflow fires on every newly opened
+issue; this check ensures only genuine Sentry alerts or manual triage requests
+are processed. All other issues are silently ignored.
 
 ### Gate 2 — Issue age check (prevent re-triage of old issues)
 
@@ -61,7 +68,7 @@ Both gates passed. Now read the full body of issue
 `${{ github.event.issue.number }}` to determine which path to follow.
 
 ### Path A — Sentry bot issue
-The issue was created by `sentry-io[bot]` or any actor whose login contains
+The issue was opened by `sentry-io[bot]` or any actor whose login contains
 the string `sentry` (case-insensitive), **or** the issue body contains a
 Sentry event URL (`https://sentry.io/`).
 Proceed with Path A parsing in Step 2.

@@ -28,7 +28,7 @@ name: "Sentry Crash Auto-Triage"
 "on":
   issues:
     types:
-    - assigned
+    - opened
 
 permissions: {}
 
