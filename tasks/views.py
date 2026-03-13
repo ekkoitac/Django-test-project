@@ -1,3 +1,5 @@
+import datetime
+
 from django.shortcuts import render, redirect, get_object_or_404
 from django.views.decorators.http import require_POST
 from django.http import HttpResponse
@@ -26,10 +28,11 @@ def index(request):
 
 @require_POST
 def add_task(request):
-    """Add a new task with an optional reminder time (HH:MM)."""
+    """Add a new task with an optional reminder time (HH:MM) and due date."""
     title = request.POST.get('title', '').strip()
     reminder_str = request.POST.get('reminder', '').strip()
     estimated_hours_str = request.POST.get('estimated_hours', '').strip()
+    due_date_str = request.POST.get('due_date', '').strip()
 
     estimated_hours = None
     if estimated_hours_str:
@@ -37,6 +40,14 @@ def add_task(request):
             estimated_hours = int(estimated_hours_str)
         except ValueError:
             pass
+
+    # BUG: format string uses DD/MM/YYYY but the UI placeholder shows YYYY-MM-DD.
+    # Entering a date like "2026-03-20" raises:
+    #   ValueError: time data '2026-03-20' does not match format '%d/%m/%Y'
+    due_label = None
+    if due_date_str:
+        parsed_due = datetime.datetime.strptime(due_date_str, '%d/%m/%Y')
+        due_label = parsed_due.strftime('%b %d, %Y')
 
     reminder_label = None
     if reminder_str:
@@ -51,6 +62,8 @@ def add_task(request):
 
     if title:
         label = f'{title} @ {reminder_label}' if reminder_label else title
+        if due_label:
+            label = f'{label} [due {due_label}]'
         Task.objects.create(title=label)
     return redirect('index')
 

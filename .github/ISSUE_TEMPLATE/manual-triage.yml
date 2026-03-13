@@ -1,6 +1,8 @@
 name: Manual Triage Request
 description: Report a crash or error for automated Sentry-style triage
 labels: ["manual-triage"]
+assignees:
+  - sentry-triage-bot[bot]
 body:
   - type: dropdown
     id: issue_type
