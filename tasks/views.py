@@ -16,7 +16,7 @@ def index(request):
         'alpha':  'title',
     }
     # BUG: direct lookup raises KeyError if ?sort= contains an unexpected value
-    order_field = sort_map[sort]
+    order_field = sort_map.get(sort, sort_map['newest'])
     tasks = Task.objects.order_by(order_field)
 
     # Show a "last added" hint in the header
